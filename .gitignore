@@ -1,0 +1,18 @@
+dataset/tacred/
+dataset/glove/
+dataset/vocab/
+saved_models/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+
+
