@@ -4,7 +4,7 @@ A class for basic vocab operations.
 
 import os
 import random
-import numpy as numpy
+import numpy as np
 import pickle
 
 from utils import constant
