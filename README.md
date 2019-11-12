@@ -7,7 +7,8 @@ The code requires that you have access to the TACRED dataset (LDC license requir
 
 First, download and unzip GloVe vectors:
 ```shell
-chmod +x download.sh; ./download.sh
+chmod +x download.sh
+./download.sh
 ```
 
 Then prepare vocabulary and initial word vectors with:
