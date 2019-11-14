@@ -16,3 +16,6 @@ Then prepare vocabulary and initial word vectors with:
 python prepare_vocab.py dataset/tacred dataset/vocab --glove_dir dataset/glove
 ```
 This will write vocabulary and word vectors as a numpy matrix into the dir `dataset/vocab`.
+
+
+test
