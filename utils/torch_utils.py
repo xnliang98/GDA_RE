@@ -197,3 +197,15 @@ def load_config(filename):
         print("[ Fail: model loading failed. ]")
     opt = dump['config']
     return opt
+
+import copy 
+
+def clones(module, N):
+    """ Produce N identical layers.
+        Args:
+            module (nn.Module): layers need to be copy.
+            N (int): copy times.
+        returns:
+            nn.ModuleList of N identical module.
+    """
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])

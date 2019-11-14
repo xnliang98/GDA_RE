@@ -1,25 +1,17 @@
 '''
 Wrapper of RNN Layer.
 '''
-
-import math
-import copy
-
 import torch
 from torch import nn
-import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
-from torch.nn import init
-import numpy as np
-from utils import constant, torch_utils
 
 class MyRNN(nn.Module):
     """ A wrapper of rnn layer."""
     def __init__(self,
                 input_size, 
                 hidden_dim, 
-                num_layers, 
-                bidirectional, 
+                num_layers=1, 
+                bidirectional=False, 
                 dropout=0, 
                 batch_first=True, 
                 use_cuda=True,
@@ -48,12 +40,15 @@ class MyRNN(nn.Module):
         else:
             return h0, c0        
     
-    def forward(self, inputs, masks):
+    def forward(self, inputs, masks=None):
         batch_size = inputs.size(0)
-        seq_lens = list(masks.data.eq(constant.PAD_ID).long().sum(1).squeeze())
         h0, c0 = self.rnn_zero_state(batch_size)
-        rnn_inputs = pack_padded_sequence(inputs, seq_lens, batch_first=self.batch_first)
-        rnn_outputs, (ht, ct) = self.rnn(rnn_inputs, (h0, c0))
-        rnn_outputs, _ = pad_packed_sequence(rnn_outputs, batch_first=self.batch_first)
+        if masks is None:
+            rnn_outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
+        else:
+            seq_lens = list(masks.data.eq(constant.PAD_ID).long().sum(1).squeeze())
+            rnn_inputs = pack_padded_sequence(inputs, seq_lens, batch_first=self.batch_first)
+            rnn_outputs, (ht, ct) = self.rnn(rnn_inputs, (h0, c0))
+            rnn_outputs, _ = pad_packed_sequence(rnn_outputs, batch_first=self.batch_first)
         
         return rnn_outputs, ht

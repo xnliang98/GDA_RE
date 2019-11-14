@@ -63,7 +63,7 @@ class PositionAwareAttention(nn.Module):
         scores = self.tlinear(torch.tanh(sum(projs))).reshape(batch_size, seq_len)
 
         # mask padding
-        scores.data.masked_fill_(x_mask.data, -float('inf'))
+        scores.data.masked_fill_(x_mask.data, -1e9)
         weights = F.softmax(scores, dim=1) # ==> B, T
         # weighted average input vectors
         out = weights.unsqueeze(1).bmm(x).squeeze(1) # B, 1, T x B, T, I ==> B, 1, I ==> B, I
