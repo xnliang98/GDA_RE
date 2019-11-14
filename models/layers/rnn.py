@@ -4,7 +4,7 @@ Wrapper of RNN Layer.
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
-
+from utils import constant
 class MyRNN(nn.Module):
     """ A wrapper of rnn layer."""
     def __init__(self,

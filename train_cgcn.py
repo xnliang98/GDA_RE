@@ -13,10 +13,9 @@ from shutil import copyfile
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.autograd import Variable
 
 from data.loader import DataLoader
-from models.trainer import GCNTrainer
+from trainer import CGCNTrainer
 from utils import torch_utils, scorer, constant, helper
 from utils.vocab import Vocab
 
@@ -89,8 +88,8 @@ def main():
     opt['num_class'] = len(label2id)
 
     # load vocab
-    vocab_file = opt['vocab_dir'] + '/vocab.pkl'
-    vocab = Vocab(vocab_file, load=True)
+    vocab_file = os.path.join(opt['vocab_dir'], 'vocab.pkl')
+    vocab = Vocab(vocab_file, True)
     opt['vocab_size'] = vocab.size
     emb_file = opt['vocab_dir'] + '/embedding.npy'
     emb_matrix = np.load(emb_file)

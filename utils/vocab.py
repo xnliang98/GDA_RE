@@ -53,7 +53,7 @@ def load_glove_vocab(file, wv_dim):
             vocab.add(token)
     return vocab
 
-def Vocab(object):
+class Vocab(object):
     """ Class of Vocabulary. 
         Attrs:
             id2word dict, id-word map
@@ -104,7 +104,7 @@ def Vocab(object):
         """
         with open(filename, 'rb') as fin:
             id2word = pickle.load(fin)
-            word2id = {v: k for k, v in id2word.items()}
+            word2id = dict([(id2word[idx], idx) for idx in range(len(id2word))])
         return id2word, word2id
 
     def save(self, filename):

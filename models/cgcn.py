@@ -36,7 +36,7 @@ class CGCNClassifier(nn.Module):
             self.in_dim = opt['hidden_dim'] * 2
             self.rnn_drop = nn.Dropout(opt['rnn_dropout'])  # use on last layer output
         self.input_W_G = nn.Linear(self.in_dim, self.mem_dim)
-        self.gcn = GCNLayer(self.in_dim, self.mem_dim, self.num_layers, 
+        self.gcn = GCNLayer(self.in_dim, self.mem_dim, opt['num_layers'], 
             opt['input_dropout'], opt.get('no_adj', False))
         in_dim = opt['hidden_dim'] * 3
         layers = [nn.Linear(in_dim, opt['hidden_dim']), nn.ReLU()]

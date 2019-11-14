@@ -19,9 +19,6 @@ class SingleGCNLayer(nn.Module):
         super(SingleGCNLayer, self).__init__()
         self.in_dim = in_dim
         self.mem_dim = mem_dim
-        self.dropout = None
-        if gcn_dropout is not None:
-            self.dropout = nn.Dropout(gcn_dropout)
         self.linear = nn.Linear(self.in_dim, self.mem_dim)
     
     def conv_l2(self):
@@ -59,11 +56,8 @@ class GCNLayer(nn.Module):
     def forward(self, adj, inputs):
         mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
 
-        if self.no_adj:
-            adj = torch.zeros_like(adj)
-        
         for layer in range(self.num_layers):
-            inputs = self.gcn[layer](inputs)
+            inputs = self.gcn[layer](adj, inputs)
             if layer < self.num_layers - 1:
                 inputs = self.gcn_drop(inputs)
 
