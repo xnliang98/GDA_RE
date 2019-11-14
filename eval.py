@@ -18,7 +18,7 @@ from utils.vocab import Vocab
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_dir', type=str, default='saved_model', help='Directory of the model.')
+    parser.add_argument('model_dir', type=str, default='saved_model', help='Directory of the model.')
     parser.add_argument('--model', type=str, default='best_model.pt', help='Name of the model file.')
     parser.add_argument('--data_dir', type=str, default='dataset/tacred')
     parser.add_argument('--dataset', type=str, default='test', help="Evaluate on dev or test.")
@@ -44,7 +44,7 @@ def main():
     print("Loading model from {}".format(model_file))
     opt = torch_utils.load_config(model_file)
 
-    model = GCNTrainer(opt)
+    model = CGCNTrainer(opt)
 
     model.load(model_file)
 

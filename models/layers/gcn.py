@@ -62,3 +62,6 @@ class GCNLayer(nn.Module):
                 inputs = self.gcn_drop(inputs)
 
         return inputs, mask
+
+class DenseGCN(nn.Module):
+    pass
