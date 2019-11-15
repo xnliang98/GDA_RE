@@ -58,3 +58,11 @@ class MultiHeadAttention(nn.Module):
 
         return attn
 
+if __name__ == "__main__":
+    query = key = torch.rand(64, 100, 200)
+    model = MultiHeadAttention(4, 200)
+    attn = model(query, key)
+    print(attn.shape)
+    t = torch.split(attn, 1, dim=1)[0].squeeze(1)
+    adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn, 1, dim=1)]
+    print(t.shape)
