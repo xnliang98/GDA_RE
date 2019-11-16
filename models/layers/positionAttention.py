@@ -53,7 +53,7 @@ class PositionAwareAttention(nn.Module):
         # x_proj = self.ulinear(x.reshape(-1, self.input_size)).reshape(batch_size, seq_len, self.attn_size)
         x_proj = self.ulinear(x) # ==> B, T, A
         q_proj = self.vlinear(q) # ==> B, A
-        q_proj = q_proj.unsqueeze(1).expand(batch_size, seq_len, self.attn_size) # B, A ==> B, 1, A ==> B, T, A
+        # q_proj = q_proj.unsqueeze(1).expand(batch_size, seq_len, self.attn_size) # B, A ==> B, 1, A ==> B, T, A
         if self.wlinear is not None:
             f_proj = self.wlinear(f) # ==> B, T, A
             projs = [x_proj, q_proj, f_proj] 

@@ -37,12 +37,19 @@ def get_parser():
     parser.set_defaults(lower=False)
 
     parser.add_argument('--heads', type=int, default=4, help='Num of heads in multi-head attention.')
+    parser.add_argument('--layers', type=int, default=2, help='Num of heads in multi-head attention.')
     parser.add_argument('--mlp_layers', type=int, default=2, help='Number of output mlp layers.')
     parser.add_argument('--no_adj', dest='no_adj', action='store_true', help="Zero out adjacency matrix for ablation.")
 
     parser.add_argument('--no-rnn', dest='rnn', action='store_false', help='Do not use RNN layer.')
     parser.add_argument('--rnn_layers', type=int, default=2, help='Number of RNN layers.')
     parser.add_argument('--rnn_dropout', type=float, default=0.5, help='RNN dropout rate.')
+
+    parser.add_argument('--position_attn', dest='position_attn', action='store_true', help='Use attention layer.')
+    parser.add_argument('--no-position_attn', dest='position_attn', action='store_false')
+    parser.set_defaults(position_attn=True)
+    parser.add_argument('--attn_dim', type=int, default=300, help='Attention size.')
+    parser.add_argument('--pe_dim', type=int, default=30, help='Position encoding dimension.')
 
     parser.add_argument('--lr', type=float, default=1.0, help='Applies to sgd and adagrad.')
     parser.add_argument('--lr_decay', type=float, default=0.9, help='Learning rate decay rate.')

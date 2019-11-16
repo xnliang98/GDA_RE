@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from data.loader import DataLoader
-from trainer import CGCNTrainer
+from trainer import CGCNTrainer, GDATrainer
 from utils import torch_utils, scorer, constant, helper
 from utils.vocab import Vocab
 
@@ -44,7 +44,7 @@ def main():
     print("Loading model from {}".format(model_file))
     opt = torch_utils.load_config(model_file)
 
-    model = CGCNTrainer(opt)
+    model = GDATrainer(opt)
 
     model.load(model_file)
 
