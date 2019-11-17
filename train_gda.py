@@ -47,7 +47,7 @@ def get_parser():
 
     parser.add_argument('--position_attn', dest='position_attn', action='store_true', help='Use attention layer.')
     parser.add_argument('--no-position_attn', dest='position_attn', action='store_false')
-    parser.set_defaults(position_attn=True)
+    parser.set_defaults(position_attn=False)
     parser.add_argument('--attn_dim', type=int, default=300, help='Attention size.')
     parser.add_argument('--pe_dim', type=int, default=30, help='Position encoding dimension.')
 

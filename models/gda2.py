@@ -123,7 +123,7 @@ class GDAClassifier(nn.Module):
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
             outputs = self.attn_layer(outputs, masks, pe_features)
         else:
-            h = gcn_outputs + rnn_outputs
+            h = outputs
             h_out = pool(h, mask, "max")
             subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)  # invert mask
             subj_out = pool(h, subj_mask, "max")
