@@ -42,7 +42,7 @@ def get_parser():
     parser.add_argument('--no_adj', dest='no_adj', action='store_true', help="Zero out adjacency matrix for ablation.")
 
     parser.add_argument('--no-rnn', dest='rnn', action='store_false', help='Do not use RNN layer.')
-    parser.add_argument('--rnn_layers', type=int, default=2, help='Number of RNN layers.')
+    parser.add_argument('--rnn_layers', type=int, default=1, help='Number of RNN layers.')
     parser.add_argument('--rnn_dropout', type=float, default=0.5, help='RNN dropout rate.')
 
     parser.add_argument('--position_attn', dest='position_attn', action='store_true', help='Use attention layer.')

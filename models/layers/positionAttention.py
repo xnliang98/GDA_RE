@@ -42,29 +42,23 @@ class PositionAwareAttention(nn.Module):
             init.normal_(self.wlinear.weight.data, std=0.001)
         init.zeros_(self.tlinear.weight)
     
-    def forward(self, x, x_mask, q, f):
-        """
-        x : batch_size * seq_len * input_size
-        q : batch_size * query_size
-        f : batch_size * seq_len * feature_size
-        """
+    def forward(self, x, x_mask, f):
         batch_size, seq_len, _ = x.size()
 
-        # x_proj = self.ulinear(x.reshape(-1, self.input_size)).reshape(batch_size, seq_len, self.attn_size)
         x_proj = self.ulinear(x) # ==> B, T, A
-        q_proj = self.vlinear(q) # ==> B, A
-        # q_proj = q_proj.unsqueeze(1).expand(batch_size, seq_len, self.attn_size) # B, A ==> B, 1, A ==> B, T, A
-        if self.wlinear is not None:
-            f_proj = self.wlinear(f) # ==> B, T, A
-            projs = [x_proj, q_proj, f_proj] 
-        else:
-            projs = [x_proj, q_proj]
+        # q_proj = self.vlinear(q) # ==> B, T, A
+    
 
-        scores = self.tlinear(torch.tanh(sum(projs))).reshape(batch_size, seq_len)
+        f_proj = self.wlinear(f) # ==> B, T, A
+        projs = [x_proj, f_proj] 
+     
+
+        scores = self.tlinear(torch.tanh(sum(projs))).reshape(batch_size, seq_len) # B, T
 
         # mask padding
         scores.data.masked_fill_(x_mask.data, -1e9)
         weights = F.softmax(scores, dim=1) # ==> B, T
+        # weights = weights.ge(0.5)
         # weighted average input vectors
         out = weights.unsqueeze(1).bmm(x).squeeze(1) # B, 1, T x B, T, I ==> B, 1, I ==> B, I
         return out

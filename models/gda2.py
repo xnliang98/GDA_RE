@@ -99,7 +99,7 @@ class GDAClassifier(nn.Module):
             gcn_inputs = self.rnn_drop(self.rnn(embs, masks)[0])
         else:
             gcn_inputs = embs
-        gcn_inputs = self.input_W_G(gcn_inputs)
+        inputs = self.input_W_G(gcn_inputs)
 
         def inputs_to_tree_reps(head, l):
             trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
@@ -109,10 +109,10 @@ class GDAClassifier(nn.Module):
             return adj.cuda() if self.opt['cuda'] else adj
 
         adj = inputs_to_tree_reps(head.data, l)
-        gcn_outputs, rnn_outputs, mask = self.gcn(adj, gcn_inputs, gcn_inputs, gcn_mask, rnn_mask)
+        outputs, mask = self.gcn(adj, inputs, gcn_mask, rnn_mask)
      
         for i in range(self.layers):
-            gcn_outputs, rnn_outputs = self.blocks[i](gcn_outputs, rnn_outputs, gcn_mask, rnn_mask)
+            outputs = self.blocks[i](outputs, gcn_mask, rnn_mask)
 
         # attention
         if self.opt['position_attn']:
@@ -121,7 +121,7 @@ class GDAClassifier(nn.Module):
             subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
             obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
-            outputs = self.attn_layer(rnn_outputs, masks, gcn_outputs, pe_features)
+            outputs = self.attn_layer(outputs, masks, pe_features)
         else:
             h = gcn_outputs + rnn_outputs
             h_out = pool(h, mask, "max")
@@ -155,22 +155,24 @@ class GDABlock(nn.Module):
         self.mem_dim = mem_dim
         self.rnn = BiLSTMBlock(self.mem_dim, rnn_layers, rnn_dropout)
         self.gcn = MultiDenseGCN(heads, self.mem_dim, gcn_layers, gcn_dropout)
-        self.linear = nn.Linear(self.mem_dim, self.mem_dim)
+        self.linear = nn.Linear(self.mem_dim * 2, self.mem_dim)
         self.attn = MultiHeadAttention(heads, self.mem_dim)
-    
-    def forward(self, gcn_inputs, rnn_inputs, gcn_mask, rnn_mask, dropout=None):
-        attn_tensor = self.attn(gcn_inputs, gcn_inputs, gcn_mask)
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, inputs, gcn_mask, rnn_mask, dropout=None):
+        attn_tensor = self.attn(inputs, inputs, gcn_mask)
         attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
-        gcn_outputs = self.gcn(attn_adj_list, gcn_inputs)
-        rnn_outputs = self.rnn(rnn_inputs, rnn_mask)
+        gcn_outputs = self.gcn(attn_adj_list, inputs)
+        rnn_outputs = self.rnn(inputs, rnn_mask)
+
+        outputs = self.linear(torch.cat([gcn_outputs, rnn_outputs], -1))
         # adj = attn_adj_list[0]
         # mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
-        attn = attention(gcn_outputs, rnn_outputs, gcn_mask, dropout)
-        # gcn_outputs = torch.matmul(attn, gcn_outputs) 
-        # rnn_outputs = torch.matmul(attn, rnn_outputs) 
-        gcn_outputs = torch.matmul(attn, gcn_outputs) + gcn_inputs
-        rnn_outputs = torch.matmul(attn, rnn_outputs) + rnn_inputs
-        return gcn_outputs, rnn_outputs
+        attn = attention(outputs, outputs, gcn_mask, dropout)
+        outputs = torch.matmul(attn, outputs)  + inputs
+        outputs = self.dropout(outputs)
+        
+        return outputs
 
 class FirstGDABlock(nn.Module):
     def __init__(self, mem_dim, gcn_layers, rnn_layers, gcn_dropout, rnn_dropout):
@@ -178,17 +180,18 @@ class FirstGDABlock(nn.Module):
         self.mem_dim = mem_dim
         self.rnn = BiLSTMBlock(self.mem_dim, rnn_layers, rnn_dropout)
         self.gcn = DenseGCN(self.mem_dim, gcn_layers, gcn_dropout)
-        self.linear = nn.Linear(self.mem_dim, self.mem_dim)
+        self.linear = nn.Linear(self.mem_dim * 2, self.mem_dim)
+        self.dropout = nn.Dropout(0.5)
     
-    def forward(self, adj, gcn_inputs, rnn_inputs, gcn_mask, rnn_mask, dropout=None):
+    def forward(self, adj, inputs, gcn_mask, rnn_mask, dropout=None):
         
-        gcn_outputs = self.gcn(adj, gcn_inputs)
-        rnn_outputs = self.rnn(rnn_inputs, rnn_mask)
-        # adj = attn_adj_list[0]
+        gcn_outputs = self.gcn(adj, inputs)
+        rnn_outputs = self.rnn(inputs, rnn_mask)
+        
+        outputs = self.linear(torch.cat([gcn_outputs, rnn_outputs], -1))
         mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
-        attn = attention(gcn_outputs, rnn_outputs, gcn_mask, dropout)
-        # gcn_outputs = torch.matmul(attn, gcn_outputs) 
-        # rnn_outputs = torch.matmul(attn, rnn_outputs) 
-        gcn_outputs = torch.matmul(attn, gcn_outputs) + gcn_inputs
-        rnn_outputs = torch.matmul(attn, rnn_outputs) + rnn_inputs
-        return gcn_outputs, rnn_outputs, mask
+        attn = attention(outputs, outputs, gcn_mask, dropout)
+        outputs = torch.matmul(attn, outputs) + inputs 
+        outputs = self.dropout(outputs)
+
+        return outputs, mask

@@ -42,7 +42,8 @@ def main():
     # load opt
     model_file = os.path.join(args.model_dir, args.model)
     print("Loading model from {}".format(model_file))
-    opt = torch_utils.load_config(model_file)
+    # opt = torch_utils.load_config(model_file)
+    opt = helper.load_config(args.model_dir + '/config.json')
 
     model = GDATrainer(opt)
 
