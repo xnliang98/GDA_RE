@@ -168,7 +168,7 @@ class GDABlock(nn.Module):
         outputs = self.linear(torch.cat([gcn_outputs, rnn_outputs], -1))
         # adj = attn_adj_list[0]
         # mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
-        attn = attention(outputs, outputs, gcn_mask, dropout)
+        attn = attention(outputs, outputs, gcn_mask, self.dropout)
         outputs = torch.matmul(attn, outputs)  + inputs
         outputs = self.dropout(outputs)
         
