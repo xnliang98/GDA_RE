@@ -27,7 +27,7 @@ def get_parser():
     parser.add_argument('--ner_dim', type=int, default=30, help='NER embedding dimension.')
     parser.add_argument('--pos_dim', type=int, default=30, help='POS embedding dimension.')
     parser.add_argument('--hidden_dim', type=int, default=200, help='RNN hidden state size.')
-    parser.add_argument('--gcn_layers', type=int, default=4, help='Num of GCN layers.')
+    parser.add_argument('--gcn_layers', type=int, default=2, help='Num of GCN layers.')
     parser.add_argument('--input_dropout', type=float, default=0.5, help='Input dropout rate.')
     parser.add_argument('--gcn_dropout', type=float, default=0.5, help='GCN layer dropout rate.')
     parser.add_argument('--word_dropout', type=float, default=0.04, help='The rate at which randomly set a word to UNK.')
@@ -42,7 +42,7 @@ def get_parser():
     parser.add_argument('--no_adj', dest='no_adj', action='store_true', help="Zero out adjacency matrix for ablation.")
 
     parser.add_argument('--no-rnn', dest='rnn', action='store_false', help='Do not use RNN layer.')
-    parser.add_argument('--rnn_layers', type=int, default=1, help='Number of RNN layers.')
+    parser.add_argument('--rnn_layers', type=int, default=2, help='Number of RNN layers.')
     parser.add_argument('--rnn_dropout', type=float, default=0.5, help='RNN dropout rate.')
 
     parser.add_argument('--position_attn', dest='position_attn', action='store_true', help='Use attention layer.')
@@ -56,7 +56,7 @@ def get_parser():
     parser.add_argument('--decay_epoch', type=int, default=5, help='Decay learning rate after this epoch.')
     parser.add_argument('--optim', choices=['sgd', 'adagrad', 'adam', 'adamax'], default='sgd', help='Optimizer: sgd, adagrad, adam or adamax.')
     parser.add_argument('--num_epoch', type=int, default=100, help='Number of total training epochs.')
-    parser.add_argument('--batch_size', type=int, default=50, help='Training batch size.')
+    parser.add_argument('--batch_size', type=int, default=64, help='Training batch size.')
     parser.add_argument('--max_grad_norm', type=float, default=5.0, help='Gradient clipping.')
     parser.add_argument('--log_step', type=int, default=20, help='Print log every k steps.')
     parser.add_argument('--log', type=str, default='logs', help='Write training log to file.')

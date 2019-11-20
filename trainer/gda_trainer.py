@@ -30,12 +30,6 @@ class GDATrainer(Trainer):
 
         logits = self.model(inputs)
         loss = self.criterion(logits, labels)
-
-        # l2
-        # if self.opt.get('conv_l2', 0) > 0:
-        #     loss += self.model.conv_l2() * self.opt['conv_l2']
-        # if self.opt.get('pooling_l2', 0) > 0:
-        #     loss += self.opt['pooling_l2'] * (pooling_output ** 2).sum(1).mean()
         loss_val = loss.item()
 
         # Step 2 backward

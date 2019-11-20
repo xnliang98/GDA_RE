@@ -31,6 +31,7 @@ def attention(query, key, mask=None, dropout=None):
     p_attn = F.softmax(scores, dim=-1)
     if dropout is not None:
         p_attn = dropout(p_attn)
+   
     return p_attn
 
 class MultiHeadAttention(nn.Module):
@@ -40,7 +41,9 @@ class MultiHeadAttention(nn.Module):
 
         self.d_k = d_model // h
         self.h = h
+      
         self.linears = clones(nn.Linear(d_model, d_model), 2)
+        self.attn = None
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, query, key, mask=None):
@@ -48,12 +51,12 @@ class MultiHeadAttention(nn.Module):
             # same mask applied to all h heads
             mask = mask.unsqueeze(1)
         nbatchs = query.size(0)
-
-        # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key = [l(x).reshape(nbatchs, -1, self.h, self.d_k).transpose(1, 2)\
-             for l, x in zip(self.linears, (query, key))]
         
-        # 2) Apply attention on all the projected vectors in batch
+            # 1) Do all the linear projections in batch from d_model => h x d_k
+        query, key = [l(x).reshape(nbatchs, -1, self.h, self.d_k).transpose(1, 2)\
+                for l, x in zip(self.linears, (query, key))]
+            
+            # 2) Apply attention on all the projected vectors in batch
         attn = attention(query, key, mask, self.dropout)
 
         return attn

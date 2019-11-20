@@ -1,6 +1,4 @@
-"""
-AGGCNs model for relation extraction.
-"""
+
 
 import torch
 import torch.nn as nn
@@ -8,7 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from models.layers import pool, MyRNN, DenseGCN, MultiDenseGCN
-from models.layers import MultiHeadAttention, attention, PositionAwareAttention
+from models.layers import MultiHeadAttention, attention
 from models.layers import Tree, head_to_tree, tree_to_adj
 from utils import constant, torch_utils
 

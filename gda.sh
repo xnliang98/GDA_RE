@@ -1,3 +1,11 @@
 
-python train_gda.py --id 03 --seed 0 --hidden_dim 100 --lr 0.3 --num_epoch 100 --gcn_layers 4 --rnn_layers 2
+python train_aggcn.py --id 05 \
+     --seed 0 \
+     --hidden_dim 300 \
+     --lr 0.3 \
+     --num_epoch 100 \
+     --pooling max  \
+     --mlp_layers 2 \
+     --num_layers 3
+
 
