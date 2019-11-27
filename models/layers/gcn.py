@@ -80,7 +80,7 @@ class DenseGCN(nn.Module):
             self.gcn.append(SingleGCNLayer(self.mem_dim + self.head_dim * layer, self.head_dim))
 
     def forward(self, adj, inputs, is_transform=True):
-        # mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
+        mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
         outputs = inputs
         cache_list = [outputs]
         output_list = []
@@ -93,8 +93,7 @@ class DenseGCN(nn.Module):
             output_list.append(self.gcn_drop(single_output))
         
         gcn_outputs = torch.cat(output_list, dim=2)
-        # print(gcn_outputs.shape)
-        # gcn_outputs = gcn_outputs + inputs
+
         if is_transform:
             out = self.linear_output(gcn_outputs)
         else:

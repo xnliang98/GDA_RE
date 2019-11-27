@@ -30,7 +30,7 @@ class GDAClassifier(nn.Module):
 
 class GCNRelationModel(nn.Module):
     def __init__(self, opt, emb_matrix=None):
-        super().__init__()
+        super(GCNRelationModel, self).__init__()
         self.opt = opt
         self.emb_matrix = emb_matrix
 
@@ -84,10 +84,10 @@ class GCNRelationModel(nn.Module):
 
         # pooling
         subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)  # invert mask
-        pool_type = self.opt['pooling']
+        pool_type = "max"
         h_out = pool(h, pool_mask, pool_type)
-        subj_out = pool(h, subj_mask, "max")
-        obj_out = pool(h, obj_mask, "max")
+        subj_out = pool(h, subj_mask, pool_type)
+        obj_out = pool(h, obj_mask, pool_type)
         outputs = torch.cat([h_out, subj_out, obj_out], dim=1)
         outputs = self.out_mlp(outputs)
 
@@ -104,7 +104,7 @@ class AGGCN(nn.Module):
 
         self.pe_obj_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
         self.pe_subj_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
-        self.in_dim = opt['emb_dim'] + opt['pos_dim'] + opt['ner_dim'] + opt['pe_emb']
+        self.in_dim = opt['emb_dim'] + opt['pos_dim'] + opt['ner_dim'] 
 
         if opt.get('rnn', False):
             input_size = self.in_dim 
@@ -147,8 +147,8 @@ class AGGCN(nn.Module):
             nn.init.xavier_uniform_(self.layers_h2t[i].weight)
             nn.init.xavier_uniform_(self.layers_i2h[i].weight)
         
-        nn.init.xavier_uniform_(self.aggregate_W.weight)
-        nn.init.xavier_uniform_(self.input_W_G.weight)
+        # nn.init.xavier_uniform_(self.aggregate_W.weight)
+        # nn.init.xavier_uniform_(self.input_W_G.weight)
     
     def forward(self, adj, inputs):
         words, masks, pos, ner, deprel, head, subj_pos, obj_pos, subj_type, obj_type = inputs # unpack
@@ -162,30 +162,31 @@ class AGGCN(nn.Module):
             embs += [self.ner_emb(ner)]
         subj_pe_inputs = self.pe_obj_emb(subj_pos + constant.MAX_LEN)
         obj_pe_inputs = self.pe_subj_emb(obj_pos + constant.MAX_LEN)
-        
+        # embs += [subj_pe_inputs, obj_pe_inputs]
+        embs = torch.cat(embs, dim=-1)
         embs = self.in_drop(embs)
 
-        rnn_outputs, hidden = self.rnn_head(embs1, masks)
-        T = rnn_outputs.size(1)
-        h = torch.cat([hidden[1], hidden[0]], dim=-1).unsqueeze(1).expand([1, T, 1])
+        rnn_outputs, hidden = self.rnn(embs, masks)
+        shape_t = rnn_outputs.size()
+        h = torch.cat([hidden[1], hidden[0]], dim=-1).unsqueeze(1).expand(shape_t)
 
         head_inputs = self.input_W_G(torch.cat([rnn_outputs, h], dim=-1))
 
         layer_list = []
         head_outputs = head_inputs
-        tail_outputs = tail_inputs
+        tail_outputs = head_inputs
         mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
         for i in range(len(self.layers_h2t)):
             if i < 1:
-                head_outputs = self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1))
+                head_outputs = F.relu(self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1)))
                 head_outputs = self.layers_head[i](adj, head_outputs)
                 tmp = torch.cat([head_outputs, tail_outputs, subj_pe_inputs], dim=-1)
-                tmp = self.layers_dropout[i](self.layers_h2t(tmp))
+                tmp = self.layers_dropout[i](self.layers_h2t[i](tmp))
 
-                tail_outputs = self.layers_tail[i](tmp)
+                tail_outputs = self.layers_tail[i](adj, tmp)
                 layer_list.append(tail_outputs)
             else:
-                head_outputs = self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1))
+                head_outputs = F.relu(self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1)))
                 attn_tensor = self.attn(head_outputs, head_outputs, src_mask)
                 attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
                 head_outputs = self.layers_head[i](attn_adj_list, head_outputs)
@@ -193,8 +194,8 @@ class AGGCN(nn.Module):
                 attn_tensor = self.attn(tail_outputs, tail_outputs, src_mask)
                 attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
                 tmp = torch.cat([head_outputs, tail_outputs, subj_pe_inputs], dim=-1)
-                tmp = self.layers_dropout[i](self.layers_h2t(tmp))
-                tail_outputs = self.layers_tail[i](tmp)
+                tmp = self.layers_dropout[i](self.layers_h2t[i](tmp))
+                tail_outputs = self.layers_tail[i](attn_adj_list, tmp)
                 layer_list.append(tail_outputs)
 
         aggregate_out = torch.cat(layer_list, dim=2)

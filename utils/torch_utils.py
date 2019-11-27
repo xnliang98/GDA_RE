@@ -202,7 +202,7 @@ def get_optimizer(name, parameters, lr):
     elif name in ['adagrad', 'myadagrad']:
         return MyAdagrad(parameters, lr=lr, init_accu_value=0.1)
     elif name == 'adam':
-        return optim.Adam(parameters, betas=(0.9, 0.99)) # use default lr
+        return optim.Adam(parameters, betas=(0.9, 0.99), lr=lr) # use default lr
     elif name == 'adamax':
         return optim.adamax(parameters) # use default lr
     elif name == 'dfw':

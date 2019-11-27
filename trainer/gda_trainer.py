@@ -47,6 +47,7 @@ class GDATrainer(Trainer):
         self.model.eval()
 
         logits = self.model(inputs)
+        # logits, _ = self.model(inputs)
         loss = self.criterion(logits, labels)
         loss_val = loss.item()
 
