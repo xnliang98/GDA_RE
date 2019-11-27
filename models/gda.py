@@ -108,7 +108,7 @@ class GDAClassifier(nn.Module):
         gcn_outputs1, _ = self.gcn1(adj, inputs[:, :, :self.mem_dim])
         gcn_outputs2, _ = self.gcn2(adj, inputs[:, :, self.mem_dim:])
         gcn_outputs = torch.cat([gcn_outputs1, gcn_outputs2], dim=-1)
-        gcn_outputs = self.layer0(gcn_outputs)
+        # gcn_outputs = self.layer0(gcn_outputs)
 
         rnn_inputs = inputs
         if self.opt['pe_emb'] > 0:
@@ -117,9 +117,9 @@ class GDAClassifier(nn.Module):
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
             rnn_inputs = self.in_lstm(torch.cat([pe_features, inputs], dim=-1))
         lstm_outputs, _ = self.lstm(rnn_inputs, masks)
-        lstm_outputs = self.layer1(lstm_outputs)
-        h1, h2 = gcn_outputs, lstm_outputs
-        # h = attention(gcn_outputs, lstm_outputs, gcn_outputs)
+        # lstm_outputs = self.layer1(lstm_outputs)
+        # h1, h2 = gcn_outputs, lstm_outputs
+        h = attention(gcn_outputs, lstm_outputs, gcn_outputs)
         h = torch.cat([h1, h2], dim=-1)
         h_head = self.layer2(h)
         h_tail = self.layer3(h)
