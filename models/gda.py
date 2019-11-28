@@ -51,7 +51,7 @@ class GDAClassifier(nn.Module):
         self.layer1 = nn.Linear(self.mem_dim * 2, self.mem_dim)
         self.layer2 = nn.Linear(self.mem_dim * 2, self.mem_dim * 2)
         self.layer3 = nn.Linear(self.mem_dim * 2, self.mem_dim * 2)
-        self.layer4 = nn.Linear(self.mem_dim * 4, self.mem_dim)
+        self.layer4 = nn.Linear(self.mem_dim * 6, self.mem_dim)
         self.classifier = nn.Linear(opt['hidden_dim'], opt['num_class'])
 
         self.init_embeddings()
@@ -96,19 +96,29 @@ class GDAClassifier(nn.Module):
         inputs = self.rnn_drop(self.rnn(embs, masks)[0])
         # inputs = self.input_W_G(inputs)
 
-        def inputs_to_tree_reps(head, l):
-            trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
-            adj = [tree_to_adj(maxlen, tree, directed=False).reshape(1, maxlen, maxlen) for tree in trees]
+        # def inputs_to_tree_reps(head, l):
+        #     trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
+        #     adj = [tree_to_adj(maxlen, tree, directed=False).reshape(1, maxlen, maxlen) for tree in trees]
+        #     adj = np.concatenate(adj, axis=0)
+        #     adj = torch.from_numpy(adj)
+        #     return adj.cuda() if self.opt['cuda'] else adj
+
+        # adj = inputs_to_tree_reps(head.data, l)
+
+        def inputs_to_tree_reps(head, words, l, prune, subj_pos, obj_pos):
+            head, words, subj_pos, obj_pos = head.cpu().numpy(), words.cpu().numpy(), subj_pos.cpu().numpy(), obj_pos.cpu().numpy()
+            trees = [head_to_tree(head[i], words[i], l[i], prune, subj_pos[i], obj_pos[i]) for i in range(len(l))]
+            adj = [tree_to_adj(maxlen, tree, directed=False, self_loop=False).reshape(1, maxlen, maxlen) for tree in trees]
             adj = np.concatenate(adj, axis=0)
             adj = torch.from_numpy(adj)
             return adj.cuda() if self.opt['cuda'] else adj
+        adj = inputs_to_tree_reps(head.data, words.data, l, 1, subj_pos.data, obj_pos.data)
 
-        adj = inputs_to_tree_reps(head.data, l)
         gcn_masks = (adj.sum(1) + adj.sum(2)).eq(0).unsqueeze(2)
         gcn_outputs1, _ = self.gcn1(adj, inputs[:, :, :self.mem_dim])
         gcn_outputs2, _ = self.gcn2(adj, inputs[:, :, self.mem_dim:])
         gcn_outputs = torch.cat([gcn_outputs1, gcn_outputs2], dim=-1)
-        # gcn_outputs = self.layer0(gcn_outputs)
+        gcn_outputs = self.layer0(gcn_outputs)
 
         rnn_inputs = inputs
         if self.opt['pe_emb'] > 0:
@@ -117,19 +127,19 @@ class GDAClassifier(nn.Module):
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
             rnn_inputs = self.in_lstm(torch.cat([pe_features, inputs], dim=-1))
         lstm_outputs, _ = self.lstm(rnn_inputs, masks)
-        # lstm_outputs = self.layer1(lstm_outputs)
-        # h1, h2 = gcn_outputs, lstm_outputs
-        h = attention(gcn_outputs, lstm_outputs, gcn_outputs)
+        lstm_outputs = self.layer1(lstm_outputs)
+        h1, h2 = gcn_outputs, lstm_outputs
+        # h = attention(gcn_outputs, lstm_outputs, gcn_outputs, masks)
         h = torch.cat([h1, h2], dim=-1)
         h_head = self.layer2(h)
         h_tail = self.layer3(h)
         # h = attention(h, h, h, masks)
         
-        # h_out = pool(h, gcn_masks, "max")
+        h_out = pool(h, gcn_masks, "max")
         subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)
         subj_out = pool(h_head, subj_mask, "max")
         obj_out = pool(h_tail, obj_mask, "max")
-        outputs = self.in_drop(torch.cat([subj_out, obj_out], dim=1))
+        outputs = self.in_drop(torch.cat([h_out, subj_out, obj_out], dim=1))
         outputs = F.relu(self.layer4(outputs))
         outputs = self.classifier(outputs)
         return outputs
@@ -148,3 +158,4 @@ def attention(query, key, value, mask=None, dropout=None):
         p_attn = dropout(p_attn)
     
     return torch.matmul(p_attn, value)
+
