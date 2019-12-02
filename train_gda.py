@@ -27,7 +27,7 @@ def get_parser():
     parser.add_argument('--ner_dim', type=int, default=30, help='NER embedding dimension.')
     parser.add_argument('--pos_dim', type=int, default=30, help='POS embedding dimension.')
     parser.add_argument('--hidden_dim', type=int, default=200, help='RNN hidden state size.')
-    parser.add_argument('--first_layer', type=int, default=2, help='Num of GCN layers.')
+    parser.add_argument('--first_layer', type=int, default=4, help='Num of GCN layers.')
     parser.add_argument('--second_layer', type=int, default=4, help='Num of GCN layers.')
     parser.add_argument('--in_dropout', type=float, default=0.5, help='Input dropout rate.')
     parser.add_argument('--gcn_dropout', type=float, default=0.5, help='GCN layer dropout rate.')
@@ -37,7 +37,7 @@ def get_parser():
     parser.add_argument('--no-lower', dest='lower', action='store_false')
     parser.set_defaults(lower=False)
 
-    parser.add_argument('--heads', type=int, default=4, help='Num of heads in multi-head attention.')
+    parser.add_argument('--heads', type=int, default=3, help='Num of heads in multi-head attention.')
     parser.add_argument('--rnn_layer', type=int, default=2, help='Num of heads in multi-head attention.')
     parser.add_argument('--rnn_dropout', type=float, default=0.5, help='RNN dropout rate.')
 

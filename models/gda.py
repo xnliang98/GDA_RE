@@ -32,26 +32,26 @@ class GDAClassifier(nn.Module):
         
         self.mem_dim = opt['hidden_dim']
         input_size = self.in_dim
-        self.rnn = MyRNN(input_size, opt['hidden_dim'], opt['rnn_layer'],
+        self.rnn = MyRNN(input_size, opt['hidden_dim'] // 2, opt['rnn_layer'],
             bidirectional=True, dropout=opt['rnn_dropout'], use_cuda=opt['cuda'])
-        self.in_dim = opt['hidden_dim'] * 2
+        self.in_dim = opt['hidden_dim']
         
         
-        self.gcn1 = GCNLayer(self.mem_dim, self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
-        self.gcn2 = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
+        self.gcn1 = GCNLayer(self.mem_dim // 2, self.mem_dim // 2, opt['first_layer'], opt['gcn_dropout'])
+        self.gcn2 = GCNLayer(self.mem_dim // 2, self.mem_dim // 2, opt['second_layer'], opt['gcn_dropout'])
         if opt['pe_emb'] > 0:
             self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
-            self.in_lstm = nn.Linear(self.mem_dim * 2 + opt['pe_emb'] * 2, self.mem_dim)
-        self.lstm = MyRNN(self.mem_dim, self.mem_dim, 1, 
+            self.in_lstm = nn.Linear(self.mem_dim + opt['pe_emb'] * 2, self.mem_dim)
+        self.lstm = MyRNN(self.mem_dim, self.mem_dim // 2, 2, 
             bidirectional=True, dropout=opt['rnn_dropout'], use_cuda=opt['cuda'])
         self.in_drop = nn.Dropout(opt['in_dropout'])
         self.rnn_drop = nn.Dropout(opt['rnn_dropout'])
 
-        self.layer0 = nn.Linear(self.mem_dim * 2, self.mem_dim)
+        # self.layer0 = nn.Linear(self.mem_dim * 2, self.mem_dim)
         self.layer1 = nn.Linear(self.mem_dim * 2, self.mem_dim)
-        self.layer2 = nn.Linear(self.mem_dim * 2, self.mem_dim * 2)
-        self.layer3 = nn.Linear(self.mem_dim * 2, self.mem_dim * 2)
-        self.layer4 = nn.Linear(self.mem_dim * 6, self.mem_dim)
+        self.layer2 = nn.Linear(self.mem_dim, self.mem_dim)
+        self.layer3 = nn.Linear(self.mem_dim, self.mem_dim)
+        self.layer4 = nn.Linear(self.mem_dim * 3, self.mem_dim)
         self.classifier = nn.Linear(opt['hidden_dim'], opt['num_class'])
 
         self.init_embeddings()
@@ -115,10 +115,10 @@ class GDAClassifier(nn.Module):
         adj = inputs_to_tree_reps(head.data, words.data, l, 1, subj_pos.data, obj_pos.data)
 
         gcn_masks = (adj.sum(1) + adj.sum(2)).eq(0).unsqueeze(2)
-        gcn_outputs1, _ = self.gcn1(adj, inputs[:, :, :self.mem_dim])
-        gcn_outputs2, _ = self.gcn2(adj, inputs[:, :, self.mem_dim:])
+        gcn_outputs1, _ = self.gcn1(adj, inputs[:, :, :self.mem_dim // 2])
+        gcn_outputs2, _ = self.gcn2(adj, inputs[:, :, self.mem_dim // 2:])
         gcn_outputs = torch.cat([gcn_outputs1, gcn_outputs2], dim=-1)
-        gcn_outputs = self.layer0(gcn_outputs)
+        # gcn_outputs = self.layer0(gcn_outputs)
 
         rnn_inputs = inputs
         if self.opt['pe_emb'] > 0:
@@ -127,20 +127,21 @@ class GDAClassifier(nn.Module):
             pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
             rnn_inputs = self.in_lstm(torch.cat([pe_features, inputs], dim=-1))
         lstm_outputs, _ = self.lstm(rnn_inputs, masks)
-        lstm_outputs = self.layer1(lstm_outputs)
+        # lstm_outputs = self.layer1(lstm_outputs)
         h1, h2 = gcn_outputs, lstm_outputs
-        # h = attention(gcn_outputs, lstm_outputs, gcn_outputs, masks)
-        h = torch.cat([h1, h2], dim=-1)
+    
+        # h = torch.cat([h1, h2], dim=-1)
+        h = attention(h1, h2, h2, masks)
+        # h = self.layer1(h)
         h_head = self.layer2(h)
         h_tail = self.layer3(h)
-        # h = attention(h, h, h, masks)
         
         h_out = pool(h, gcn_masks, "max")
         subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)
         subj_out = pool(h_head, subj_mask, "max")
         obj_out = pool(h_tail, obj_mask, "max")
         outputs = self.in_drop(torch.cat([h_out, subj_out, obj_out], dim=1))
-        outputs = F.relu(self.layer4(outputs))
+        outputs = self.in_drop(self.layer4(outputs)）
         outputs = self.classifier(outputs)
         return outputs
 

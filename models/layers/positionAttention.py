@@ -62,3 +62,4 @@ class PositionAwareAttention(nn.Module):
         # weighted average input vectors
         out = weights.unsqueeze(1).bmm(x).squeeze(1) # B, 1, T x B, T, I ==> B, 1, I ==> B, I
         return out
+

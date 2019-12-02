@@ -80,7 +80,7 @@ class DenseGCN(nn.Module):
             self.gcn.append(SingleGCNLayer(self.mem_dim + self.head_dim * layer, self.head_dim))
 
     def forward(self, adj, inputs, is_transform=True):
-        mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
+        # mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
         outputs = inputs
         cache_list = [outputs]
         output_list = []
