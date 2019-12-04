@@ -6,52 +6,56 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import math
+# from torch.nn.modules import MultiheadAttention
 
-from models.layers import pool, MyRNN, DenseGCN, MultiDenseGCN
+from models.layers import pool, MyRNN, DenseGCN, MultiDenseGCN, GCNLayer
 from models.layers import MultiHeadAttention
 from models.layers import Tree, head_to_tree, tree_to_adj
 from utils import constant, torch_utils
 
-
 class GDAClassifier(nn.Module):
-    """ A wrapper classifier for GCNRelationModel. """
-
     def __init__(self, opt, emb_matrix=None):
-        super().__init__()
-        self.gcn_model = GCNRelationModel(opt, emb_matrix=emb_matrix)
-        in_dim = opt['hidden_dim']
-        self.classifier = nn.Linear(in_dim, opt['num_class'])
-        self.opt = opt
-
-    def forward(self, inputs):
-        outputs, pooling_output = self.gcn_model(inputs)
-        logits = self.classifier(outputs)
-        return logits, pooling_output
-
-class GCNRelationModel(nn.Module):
-    def __init__(self, opt, emb_matrix=None):
-        super(GCNRelationModel, self).__init__()
+        super(GDAClassifier, self).__init__()
         self.opt = opt
         self.emb_matrix = emb_matrix
-
-        # create embedding layers
+        
         self.emb = nn.Embedding(opt['vocab_size'], opt['emb_dim'], padding_idx=constant.PAD_ID)
         self.pos_emb = nn.Embedding(len(constant.POS_TO_ID), opt['pos_dim']) if opt['pos_dim'] > 0 else None
         self.ner_emb = nn.Embedding(len(constant.NER_TO_ID), opt['ner_dim']) if opt['ner_dim'] > 0 else None
-        embeddings = (self.emb, self.pos_emb, self.ner_emb)
+        
+        self.in_dim = opt['emb_dim']
+        if self.pos_emb:
+            self.in_dim += opt['pos_dim']
+        if self.ner_emb:
+            self.in_dim += opt['ner_dim']
+        
+        self.mem_dim = opt['hidden_dim']
+        input_size = self.in_dim
+        self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
+        self.rnn = MyRNN(input_size, opt['hidden_dim'] // 2, opt['rnn_layer'],
+            bidirectional=True, dropout=opt['rnn_dropout'], use_cuda=opt['cuda'])
+ 
+        self.blk1 = firstBlock(opt, self.mem_dim, self.pe_emb, 0.5)
+        self.blks = nn.ModuleList()
+        self.num_blocks = 4
+        for i in range(self.num_blocks):
+            self.blks.append(secondBlock(opt, self.mem_dim, self.pe_emb, 0.5))
+        
+        self.in_drop = nn.Dropout(opt['in_dropout'])
+        self.rnn_drop = nn.Dropout(opt['rnn_dropout'])
+        self.drop = nn.Dropout(opt['rnn_dropout'])
+
+        self.layer0 = nn.Linear(self.mem_dim * (self.num_blocks + 1), self.mem_dim)
+        self.layer1 = nn.Linear(self.mem_dim * 3, self.mem_dim)
+        self.layer2 = nn.Linear(self.mem_dim, self.mem_dim)
+        self.classifier = nn.Linear(opt['hidden_dim'], opt['num_class'])
+        self.attn = MultiHeadAttention(opt['heads'], self.mem_dim)
         self.init_embeddings()
 
-        # gcn layer
-        self.gcn = AGGCN(opt, embeddings)
-
-        # mlp output layer
-        in_dim = opt['hidden_dim'] * 3
-        layers = [nn.Linear(in_dim, opt['hidden_dim']), nn.ReLU()]
-        for _ in range(self.opt['mlp_layers'] - 1):
-            layers += [nn.Linear(opt['hidden_dim'], opt['hidden_dim']), nn.ReLU()]
-        self.out_mlp = nn.Sequential(*layers)
-
     def init_embeddings(self):
+        if self.opt['pe_emb'] > 0:
+            self.pe_emb.weight.data.uniform_(-1.0, 1.0)
         if self.emb_matrix is None:
             self.emb.weight.data[1:, :].uniform_(-1.0, 1.0)
         else:
@@ -71,87 +75,6 @@ class GCNRelationModel(nn.Module):
         words, masks, pos, ner, deprel, head, subj_pos, obj_pos, subj_type, obj_type = inputs # unpack
         l = (masks.data.cpu().numpy() == 0).astype(np.int64).sum(1)
         maxlen = max(l)
-
-        def inputs_to_tree_reps(head, l):
-            trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
-            adj = [tree_to_adj(maxlen, tree, directed=False).reshape(1, maxlen, maxlen) for tree in trees]
-            adj = np.concatenate(adj, axis=0)
-            adj = torch.from_numpy(adj)
-            return adj.cuda() if self.opt['cuda'] else adj
-
-        adj = inputs_to_tree_reps(head.data, l)
-        h, pool_mask = self.gcn(adj, inputs)
-
-        # pooling
-        subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)  # invert mask
-        pool_type = "max"
-        h_out = pool(h, pool_mask, pool_type)
-        subj_out = pool(h, subj_mask, pool_type)
-        obj_out = pool(h, obj_mask, pool_type)
-        outputs = torch.cat([h_out, subj_out, obj_out], dim=1)
-        outputs = self.out_mlp(outputs)
-
-        return outputs, h_out
-
-class AGGCN(nn.Module):
-    def __init__(self, opt, embeddings):
-        super(AGGCN, self).__init__()
-        self.opt = opt
-        
-        self.emb, self.pos_emb, self.ner_emb = embeddings
-        self.use_cuda = opt['cuda']
-        self.mem_dim = opt['hidden_dim']
-
-        self.pe_obj_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
-        self.pe_subj_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
-        self.in_dim = opt['emb_dim'] + opt['pos_dim'] + opt['ner_dim'] 
-
-        if opt.get('rnn', False):
-            input_size = self.in_dim 
-            self.rnn = MyRNN(input_size, opt['hidden_dim'], opt['rnn_layers'],
-                bidirectional=True, dropout=opt['rnn_dropout'], use_cuda=opt['cuda'])
-            self.in_dim = opt['hidden_dim'] * 4
-            self.rnn_drop = nn.Dropout(opt['rnn_dropout'])  # use on last layer output
-        self.input_W_G = nn.Linear(self.in_dim, self.mem_dim)
-
-        self.in_drop = nn.Dropout(opt['input_dropout'])
-        self.num_layers = opt['num_layers']
-
-        self.layers_head = nn.ModuleList()
-        self.layers_tail = nn.ModuleList()
-        self.heads = opt['heads']
-        self.sublayer_head = opt['sublayer_first']
-        self.sublayer_tail = opt['sublayer_second']
-        self.layers_h2t = nn.ModuleList()
-        self.layers_i2h = nn.ModuleList()
-        self.layers_dropout = nn.ModuleList()
-        for i in range(self.num_layers):
-            if i == 0:
-                self.layers_head.append(DenseGCN(self.mem_dim, self.sublayer_head, opt['gcn_dropout']))
-                self.layers_tail.append(DenseGCN(self.mem_dim, self.sublayer_tail, opt['gcn_dropout']))
-            else:
-                self.layers_head.append(MultiDenseGCN(self.heads, self.mem_dim, self.sublayer_head, opt['gcn_dropout']))
-                self.layers_tail.append(MultiDenseGCN(self.heads, self.mem_dim, self.sublayer_tail, opt['gcn_dropout']))
-            self.layers_i2h.append(nn.Linear(self.mem_dim + opt['pe_emb'], self.mem_dim))
-            self.layers_h2t.append(nn.Linear(self.mem_dim * 2 + opt['pe_emb'], self.mem_dim))
-            self.layers_dropout.append(nn.Dropout(0.5))
-        
-        self.aggregate_W = nn.Linear(len(self.layers_h2t) * self.mem_dim, self.mem_dim)
-        self.attn = MultiHeadAttention(self.heads, self.mem_dim)
-        self.init_weights()
-    
-    def init_weights(self):
-        self.pe_obj_emb.weight.data.uniform_(-1.0, 1.0)
-        self.pe_subj_emb.weight.data.uniform_(-1.0, 1.0)
-        for i in range(self.num_layers):
-            nn.init.xavier_uniform_(self.layers_h2t[i].weight)
-            nn.init.xavier_uniform_(self.layers_i2h[i].weight)
-        
-        # nn.init.xavier_uniform_(self.aggregate_W.weight)
-        # nn.init.xavier_uniform_(self.input_W_G.weight)
-    
-    def forward(self, adj, inputs):
-        words, masks, pos, ner, deprel, head, subj_pos, obj_pos, subj_type, obj_type = inputs # unpack
         src_mask = (words != constant.PAD_ID).unsqueeze(-2)
         word_embs = self.emb(words)
         embs = [word_embs]
@@ -160,46 +83,136 @@ class AGGCN(nn.Module):
             embs += [self.pos_emb(pos)]
         if self.opt['ner_dim'] > 0:
             embs += [self.ner_emb(ner)]
-        subj_pe_inputs = self.pe_obj_emb(subj_pos + constant.MAX_LEN)
-        obj_pe_inputs = self.pe_subj_emb(obj_pos + constant.MAX_LEN)
-        # embs += [subj_pe_inputs, obj_pe_inputs]
-        embs = torch.cat(embs, dim=-1)
+        
+        embs = torch.cat(embs, dim=2)
         embs = self.in_drop(embs)
+     
+        inputs = self.rnn_drop(self.rnn(embs, masks)[0])
+        # inputs = self.input_W_G(inputs)
 
-        rnn_outputs, hidden = self.rnn(embs, masks)
-        shape_t = rnn_outputs.size()
-        h = torch.cat([hidden[1], hidden[0]], dim=-1).unsqueeze(1).expand(shape_t)
+        # def inputs_to_tree_reps(head, l):
+        #     trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
+        #     adj = [tree_to_adj(maxlen, tree, directed=False).reshape(1, maxlen, maxlen) for tree in trees]
+        #     adj = np.concatenate(adj, axis=0)
+        #     adj = torch.from_numpy(adj)
+        #     return adj.cuda() if self.opt['cuda'] else adj
 
-        head_inputs = self.input_W_G(torch.cat([rnn_outputs, h], dim=-1))
+        # adj = inputs_to_tree_reps(head.data, l)
 
-        layer_list = []
-        head_outputs = head_inputs
-        tail_outputs = head_inputs
-        mask = (adj.sum(2) + adj.sum(1)).eq(0).unsqueeze(2)
-        for i in range(len(self.layers_h2t)):
-            if i < 1:
-                head_outputs = F.relu(self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1)))
-                head_outputs = self.layers_head[i](adj, head_outputs)
-                tmp = torch.cat([head_outputs, tail_outputs, subj_pe_inputs], dim=-1)
-                tmp = self.layers_dropout[i](self.layers_h2t[i](tmp))
+        def inputs_to_tree_reps(head, words, l, prune, subj_pos, obj_pos):
+            head, words, subj_pos, obj_pos = head.cpu().numpy(), words.cpu().numpy(), subj_pos.cpu().numpy(), obj_pos.cpu().numpy()
+            trees = [head_to_tree(head[i], words[i], l[i], prune, subj_pos[i], obj_pos[i]) for i in range(len(l))]
+            adj = [tree_to_adj(maxlen, tree, directed=False, self_loop=False).reshape(1, maxlen, maxlen) for tree in trees]
+            adj = np.concatenate(adj, axis=0)
+            adj = torch.from_numpy(adj)
+            return adj.cuda() if self.opt['cuda'] else adj
+        adj = inputs_to_tree_reps(head.data, words.data, l, 1, subj_pos.data, obj_pos.data)
 
-                tail_outputs = self.layers_tail[i](adj, tmp)
-                layer_list.append(tail_outputs)
-            else:
-                head_outputs = F.relu(self.layers_i2h[i](torch.cat([head_outputs, obj_pe_inputs], dim=-1)))
-                attn_tensor = self.attn(head_outputs, head_outputs, src_mask)
-                attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
-                head_outputs = self.layers_head[i](attn_adj_list, head_outputs)
+        gcn_masks = (adj.sum(1) + adj.sum(2)).eq(0).unsqueeze(2)
+        out = self.blk1(inputs, adj, subj_pos, obj_pos, masks)
+        out_list = [out]
+        for i in range(self.num_blocks):
+            attn_tensor = self.attn(out, out, src_mask)
+            attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
+            out = self.blks[i](out, attn_adj_list, subj_pos, obj_pos, masks)
+            out_list.append(out)
 
-                attn_tensor = self.attn(tail_outputs, tail_outputs, src_mask)
-                attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
-                tmp = torch.cat([head_outputs, tail_outputs, subj_pe_inputs], dim=-1)
-                tmp = self.layers_dropout[i](self.layers_h2t[i](tmp))
-                tail_outputs = self.layers_tail[i](attn_adj_list, tmp)
-                layer_list.append(tail_outputs)
+        outputs = torch.cat(out_list, dim=-1)
+        h = self.drop(outputs)
+        h = self.layer0(outputs)
+        # h = self.drop(h)
+        # h = self.layer1(h)
 
-        aggregate_out = torch.cat(layer_list, dim=2)
-        dcgcn_output = self.aggregate_W(aggregate_out)
+        h_out = pool(h, gcn_masks, "max")
+        subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)
+        subj_out = pool(h, subj_mask, "max")
+        obj_out = pool(h, obj_mask, "max")
+        outputs = self.in_drop(torch.cat([h_out, subj_out, obj_out], dim=1))
 
-        return dcgcn_output, mask
+        outputs = F.relu(self.layer1(outputs))
+        outputs = F.relu(self.layer2(outputs))
+        outputs = self.classifier(outputs)
+        return outputs
 
+
+
+def attention(query, key, value, mask=None, dropout=None):
+    d_k = query.size(-1)
+    scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
+    mask = mask.unsqueeze(1)
+    if mask is not None:
+        scores = scores.masked_fill(mask, -1e9)
+        # print(scores)
+    p_attn = F.softmax(scores, dim=-1)
+    if dropout is not None:
+        p_attn = dropout(p_attn)
+    
+    return torch.matmul(p_attn, value)
+
+class firstBlock(nn.Module):
+    def __init__(self, opt, mem_dim, pe_emb, dropout):
+        super(firstBlock, self).__init__()
+        self.mem_dim = mem_dim
+        # self.gcn1 = DenseGCN(self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
+        self.gcn1 = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
+        self.pe_emb = pe_emb
+        self.in_lstm = nn.Linear(self.mem_dim + opt['pe_emb'] * 2, self.mem_dim)
+        self.lstm = MyRNN(self.mem_dim, self.mem_dim // 2, 1, bidirectional=True, use_cuda=opt['cuda'])
+        self.linear = nn.Linear(mem_dim, mem_dim)
+        # self.out = nn.Linear(mem_dim, mem_dim)
+        self.dropout = nn.Dropout(dropout)
+    
+    def forward(self, inputs, adj, subj_pos, obj_pos, masks):
+        gcn_outputs1, _ = self.gcn1(adj, inputs)
+        # gcn_outputs2 = self.gcn2(adj, inputs[:, :, self.mem_dim // 2:])
+        # gcn_outputs = torch.cat([gcn_outputs1, gcn_outputs2], dim=-1)
+        gcn_outputs = gcn_outputs1
+        rnn_inputs = inputs
+        
+        subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
+        obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
+        pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
+        rnn_inputs = self.in_lstm(torch.cat([pe_features, inputs], dim=-1))
+        lstm_outputs, _ = self.lstm(rnn_inputs, masks)
+        # lstm_outputs = self.layer1(lstm_outputs)
+        h1, h2 = gcn_outputs, lstm_outputs
+    
+        # h = torch.cat([h1, h2], dim=-1)
+        h = self.dropout(attention(h1, h2, h2, masks))
+        h = self.linear(h + inputs)
+
+        return h
+
+class secondBlock(nn.Module):
+    def __init__(self, opt, mem_dim, pe_emb, dropout):
+        super(secondBlock, self).__init__()
+        self.mem_dim = mem_dim
+        self.gcn = MultiDenseGCN(opt['heads'], self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
+        # self.gcn = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
+        self.pe_emb = pe_emb
+        self.in_lstm = nn.Linear(self.mem_dim + opt['pe_emb'] * 2, self.mem_dim)
+        self.lstm = MyRNN(self.mem_dim, self.mem_dim // 2, 1, bidirectional=True, use_cuda=opt['cuda'])
+        self.linear = nn.Linear(mem_dim, mem_dim)
+        # self.out = nn.Linear(mem_dim, mem_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, inputs, adj_list, subj_pos, obj_pos, masks):
+        gcn_outputs = self.gcn(adj_list, inputs)
+        rnn_inputs = inputs
+        
+        subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
+        obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
+        pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
+        rnn_inputs = self.in_lstm(torch.cat([pe_features, inputs], dim=-1))
+        lstm_outputs, _ = self.lstm(rnn_inputs, masks)
+        h1, h2 = gcn_outputs, lstm_outputs
+
+        # h = torch.cat([h1, h2], dim=-1)
+        h = self.dropout(attention(h1, h2, h2, masks))
+        h = self.linear(h + inputs)
+        return h
+
+
+    
+
+        
