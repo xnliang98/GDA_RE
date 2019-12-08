@@ -38,7 +38,7 @@ class GDAClassifier(nn.Module):
  
         self.blk1 = firstBlock(opt, self.mem_dim, self.pe_emb, 0.5)
         self.blks = nn.ModuleList()
-        self.num_blocks = 4
+        self.num_blocks = 6
         for i in range(self.num_blocks):
             self.blks.append(secondBlock(opt, self.mem_dim, self.pe_emb, 0.5))
         
@@ -112,9 +112,9 @@ class GDAClassifier(nn.Module):
         out = self.blk1(inputs, adj, subj_pos, obj_pos, masks)
         out_list = [out]
         for i in range(self.num_blocks):
-            attn_tensor = self.attn(out, out, src_mask)
-            attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
-            out = self.blks[i](out, attn_adj_list, subj_pos, obj_pos, masks)
+            # attn_tensor = self.attn(out, out, src_mask)
+            # attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
+            out = self.blks[i](out, adj, subj_pos, obj_pos, masks)
             out_list.append(out)
 
         outputs = torch.cat(out_list, dim=-1)
@@ -187,8 +187,8 @@ class secondBlock(nn.Module):
     def __init__(self, opt, mem_dim, pe_emb, dropout):
         super(secondBlock, self).__init__()
         self.mem_dim = mem_dim
-        self.gcn = MultiDenseGCN(opt['heads'], self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
-        # self.gcn = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
+        # self.gcn = MultiDenseGCN(opt['heads'], self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
+        self.gcn = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
         self.pe_emb = pe_emb
         self.in_lstm = nn.Linear(self.mem_dim + opt['pe_emb'] * 2, self.mem_dim)
         self.lstm = MyRNN(self.mem_dim, self.mem_dim // 2, 1, bidirectional=True, use_cuda=opt['cuda'])
@@ -197,7 +197,7 @@ class secondBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, inputs, adj_list, subj_pos, obj_pos, masks):
-        gcn_outputs = self.gcn(adj_list, inputs)
+        gcn_outputs, _ = self.gcn(adj_list, inputs)
         rnn_inputs = inputs
         
         subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)

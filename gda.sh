@@ -1,5 +1,5 @@
 
-python train_gda.py --id 02 \
+python train_gda.py --id 03 \
      --seed 0 \
      --hidden_dim 300 \
      --rnn_layer 2 \
