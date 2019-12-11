@@ -10,7 +10,7 @@ import math
 # from torch.nn.modules import MultiheadAttention
 
 from models.layers import pool, MyRNN, DenseGCN, MultiDenseGCN, GCNLayer
-from models.layers import MultiHeadAttention, PositionAwareAttention
+from models.layers import MultiHeadAttention, PositionAwareAttention, PAAttention
 from models.layers import Tree, head_to_tree, tree_to_adj
 from utils import constant, torch_utils
 
@@ -35,12 +35,16 @@ class GDAClassifier(nn.Module):
         self.pe_emb = nn.Embedding(constant.MAX_LEN * 2 + 1, opt['pe_emb'])
         self.rnn = MyRNN(input_size, opt['hidden_dim'] // 2, opt['rnn_layer'],
             bidirectional=True, dropout=opt['rnn_dropout'], use_cuda=opt['cuda'])
- 
-        self.gcn = GCNLayer(self.mem_dim, self.mem_dim, opt['first_layer'], opt['gcn_dropout'])
-        self.in_drop = nn.Dropout(opt['in_dropout'])
+        self.input_W_G = nn.Linear(input_size, self.mem_dim)
+        self.num_blocks = 3
+        self.blks = nn.ModuleList()
+        for i in range(self.num_blocks):
+            self.blks.append(MyBlock(opt, self.mem_dim, dropout=0.2))
         self.drop = nn.Dropout(opt['rnn_dropout'])
-        self.pos_attn = PositionAwareAttention(self.mem_dim, self.mem_dim, opt['pe_emb'] * 2, self.mem_dim)
-        self.linear = nn.Linear(self.mem_dim * 4, self.mem_dim)
+        # self.pos_attn = PositionAwareAttention(self.mem_dim, self.mem_dim, opt['pe_emb'] * 2, self.mem_dim)
+        self.linear = nn.Linear(self.mem_dim * self.num_blocks, self.mem_dim)
+
+        self.out = nn.Linear(self.mem_dim, self.mem_dim)
         self.classifier = nn.Linear(opt['hidden_dim'], opt['num_class'])
 
         self.init_embeddings()
@@ -77,10 +81,10 @@ class GDAClassifier(nn.Module):
             embs += [self.ner_emb(ner)]
         
         embs = torch.cat(embs, dim=2)
-        embs = self.in_drop(embs)
+        embs = self.drop(embs)
      
-        inputs, hidden = self.rnn(embs, masks)
-        # inputs = self.input_W_G(inputs)
+        # inputs, hidden = self.rnn(embs, masks)
+        inputs = self.input_W_G(embs)
 
         # def inputs_to_tree_reps(head, l):
         #     trees = [head_to_tree(head[i], l[i]) for i in range(len(l))]
@@ -100,38 +104,19 @@ class GDAClassifier(nn.Module):
             return adj.cuda() if self.opt['cuda'] else adj
         adj = inputs_to_tree_reps(head.data, words.data, l, 1, subj_pos.data, obj_pos.data)
 
-        gcn_masks = (adj.sum(1) + adj.sum(2)).eq(0).unsqueeze(2)
-        # out = self.blk1(inputs, adj, subj_pos, obj_pos, masks)
-        # out_list = [out]
-        # for i in range(self.num_blocks):
-        #     # attn_tensor = self.attn(out, out, src_mask)
-        #     # attn_adj_list = [attn_adj.squeeze(1) for attn_adj in torch.split(attn_tensor, 1, dim=1)]
-        #     out = self.blks[i](out, adj, subj_pos, obj_pos, masks)
-        #     out_list.append(out)
-
-        # outputs = torch.cat(out_list, dim=-1)
-        # h = self.drop(outputs)
-        # h = self.layer0(outputs)
-        
-        gcn_outputs, _ = self.gcn(adj, inputs)
-        # gcn_outputs = self.drop(gcn_outputs)
-        
-
-        out1 = attention(gcn_outputs, inputs, inputs, masks)
-        hidden = torch.cat([hidden[-1, :, :], hidden[-2, :, :]], dim=-1)
-        # out1 = self.drop(out1)
-        
         subj_pe_inputs = self.pe_emb(subj_pos + constant.MAX_LEN)
         obj_pe_inputs = self.pe_emb(obj_pos + constant.MAX_LEN)
         pe_features = torch.cat((subj_pe_inputs, obj_pe_inputs), dim=2)
         
-        outputs = self.pos_attn(out1, masks, hidden, pe_features, gcn_outputs)
-        outputs = self.drop(outputs)
-        # subj_mask, obj_mask = subj_pos.eq(0).eq(0).unsqueeze(2), obj_pos.eq(0).eq(0).unsqueeze(2)
-        # subj_out = pool(gcn_outputs, subj_mask, "max")
-        # obj_out = pool(gcn_outputs, obj_mask, "max")
-        # gcn_outputs = pool(gcn_outputs, gcn_masks, "max")
-        # outputs = F.relu(self.linear(torch.cat([gcn_outputs, outputs, obj_out, subj_out], dim=-1)))
+        # gcn_outputs, _ = self.gcn(adj, inputs)
+        # gcn_outputs = self.drop(gcn_outputs)
+        outputs_list = []
+        outputs = inputs
+        for i in range(self.num_blocks):
+            outputs, _, _ = self.blks[i](outputs, adj, pe_features, masks)
+            outputs_list.append(outputs)
+        # outputs = self.linear(torch.cat(outputs_list, -1))
+        outputs = F.relu(self.out(torch.sum(outputs, dim=1).squeeze()))
         outputs = self.classifier(outputs)
         return outputs
 
@@ -151,26 +136,23 @@ def attention(query, key, value, mask=None, dropout=None):
     return torch.matmul(p_attn, value)
 
 class MyBlock(nn.Module):
-    def __init__(self, opt, mem_dim, pe_emb, dropout):
-        super(firstBlock, self).__init__()
+    def __init__(self, opt, mem_dim, dropout):
+        super(MyBlock, self).__init__()
         self.mem_dim = mem_dim
         self.gcn = GCNLayer(self.mem_dim, self.mem_dim, opt['second_layer'], opt['gcn_dropout'])
         self.lstm = MyRNN(self.mem_dim, self.mem_dim // 2, 1, bidirectional=True, use_cuda=opt['cuda'])
         self.linear = nn.Linear(mem_dim, mem_dim)
+        self.pa_attn = PAAttention(self.mem_dim, self.mem_dim, opt['pe_emb'] * 2, self.mem_dim)
         self.dropout = nn.Dropout(dropout)
     
-    def forward(self, inputs, adj, masks):
-        gcn_outputs, _ = self.gcn(adj, inputs)
-    
-        rnn_inputs = inputs
-        
-        lstm_outputs, (hidden, c) = self.lstm(rnn_inputs, masks)
-        h1, h2 = gcn_outputs, lstm_outputs
-    
-        h = attention(h1, h2, h2, masks, self.dropout)
-        # h = self.linear(h + inputs)
-
-        return h, h2, hidden
+    def forward(self, inputs, adj, pe_features, masks):
+        lstm_outputs, hidden = self.lstm(inputs, masks)
+        gcn_outputs, _ = self.gcn(adj, lstm_outputs)
+        gcn_outputs = self.dropout(gcn_outputs)
+        hidden = self.dropout(torch.cat([hidden[-1, :, :], hidden[-2, :, :]], dim=-1))
+        out1 = attention(gcn_outputs, lstm_outputs, lstm_outputs, masks)
+        outputs = self.pa_attn(lstm_outputs, masks, hidden, pe_features, gcn_outputs)
+        return outputs, gcn_outputs, hidden
     
 
         

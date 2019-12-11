@@ -5,3 +5,4 @@ from models.aggcn import AGGCNClassifier
 # from models.gda3 import GDAClassifier
 # from models.gda4 import GDAClassifier
 from models.gda5 import GDAClassifier
+# from models.gda6 import GDAClassifier

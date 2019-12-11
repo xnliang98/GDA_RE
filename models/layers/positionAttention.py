@@ -1,3 +1,4 @@
+
 '''
 Position Aware Attention Layer.
 '''
@@ -13,15 +14,15 @@ import numpy as np
 from utils import constant, torch_utils
 
 
-class PositionAwareAttention(nn.Module):
+class PAAttention(nn.Module):
     """
     A position-augmented attention layer where the attention weight is
     a = T' . tanh(Ux + Vq + Wf)
     where x is the input, q is the query, and f is additional position features.
     """
+    
     def __init__(self, input_size, query_size, feature_size, attn_size):
-        super(PositionAwareAttention, self).__init__()
-
+        super(PAAttention, self).__init__()
         self.input_size = input_size
         self.query_size = query_size
         self.feature_size = feature_size
@@ -32,34 +33,37 @@ class PositionAwareAttention(nn.Module):
             self.wlinear = nn.Linear(feature_size, attn_size, bias=False)
         else:
             self.wlinear = None
-        self.tlinear = nn.Linear(attn_size, 1)
-        self.init_weight()
-    
-    def init_weight(self):
-        init.normal_(self.ulinear.weight.data, std=0.001)
-        init.normal_(self.vlinear.weight.data, std=0.001)
+        self.glinear = nn.Linear(input_size, attn_size)
+        self.tlinear = nn.Linear(attn_size, attn_size)
+        self.init_weights()
+
+    def init_weights(self):
+        self.ulinear.weight.data.normal_(std=0.001)
+        self.vlinear.weight.data.normal_(std=0.001)
+        self.glinear.weight.data.normal_(std=0.001)
         if self.wlinear is not None:
-            init.normal_(self.wlinear.weight.data, std=0.001)
-        init.zeros_(self.tlinear.weight)
+            self.wlinear.weight.data.normal_(std=0.001)
+        self.tlinear.weight.data.zero_() # use zero to give uniform attention at the beginning
     
-    def forward(self, x, x_mask, f):
+    def forward(self, x, x_mask, q, f, g):
+        """
+        x : batch_size * seq_len * input_size
+        q : batch_size * query_size
+        f : batch_size * seq_len * feature_size
+        """
         batch_size, seq_len, _ = x.size()
 
-        x_proj = self.ulinear(x) # ==> B, T, A
-        # q_proj = self.vlinear(q) # ==> B, T, A
-    
+        x_proj = self.ulinear(x.contiguous().view(-1, self.input_size)).view(
+            batch_size, seq_len, self.attn_size)
+        q_proj = self.vlinear(q).unsqueeze(1).expand(batch_size, seq_len, self.attn_size)
+        g_proj = self.glinear(g)
+        if self.wlinear is not None:
+            f_proj = self.wlinear(f.view(-1, self.feature_size)).contiguous().view(
+                batch_size, seq_len, self.attn_size)
+            projs = [x_proj, q_proj, f_proj, g_proj]
+        else:
+            projs = [x_proj, q_proj, g_proj]
+        scores = self.tlinear(torch.tanh(sum(projs)))
 
-        f_proj = self.wlinear(f) # ==> B, T, A
-        projs = [x_proj, f_proj] 
-     
-
-        scores = self.tlinear(torch.tanh(sum(projs))).reshape(batch_size, seq_len) # B, T
-
-        # mask padding
-        scores.data.masked_fill_(x_mask.data, -1e9)
-        weights = F.softmax(scores, dim=1) # ==> B, T
-        # weights = weights.ge(0.5)
-        # weighted average input vectors
-        out = weights.unsqueeze(1).bmm(x).squeeze(1) # B, 1, T x B, T, I ==> B, 1, I ==> B, I
-        return out
-
+        outputs = scores
+        return outputs
